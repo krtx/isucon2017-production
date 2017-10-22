@@ -45,11 +45,50 @@ func (r *Renderer) Render(w io.Writer, name string, data interface{}, c echo.Con
 
 var (
 	havereadC = newHaveReadCache()
+	messageC  = newMessageCache()
 )
 
 type HaveReadCacheKey struct {
 	userId int64
 	chanId int64
+}
+
+type MessageCache struct {
+	data map[int64]int64
+}
+
+func newMessageCache() *MessageCache {
+	return &MessageCache{
+		make(map[int64]int64),
+	}
+}
+
+func (c *MessageCache) addMessage(chanId int64) {
+	if val, ok := c.data[chanId]; ok {
+		c.data[chanId] = val + 1
+	} else {
+		c.data[chanId] = 1
+	}
+}
+func (c *MessageCache) getCount(chanId int64) int64 {
+	if val, ok := c.data[chanId]; ok {
+		return val
+	} else {
+		return 0
+	}
+}
+
+func (c *MessageCache) initializeFromDB() {
+	type Result struct {
+		channelID int64 `db:"channel_id"`
+		count     int64 `db:"count"`
+	}
+	c.data = make(map[int64]int64)
+	dst := []Result{}
+	db.Select(&dst, `SELECT channel_id, COUNT(*) AS count from message GROUP BY channel_id`)
+	for _, r := range dst {
+		c.data[r.channelID] = r.count
+	}
 }
 
 type HaveReadCache struct {
@@ -144,7 +183,9 @@ func addMessage(channelID, userID int64, content string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return res.LastInsertId()
+	insertId, err := res.LastInsertId()
+	messageC.addMessage(channelID) // TODO: add insertId
+	return insertId, err
 }
 
 type Message struct {
@@ -257,6 +298,7 @@ func getInitialize(c echo.Context) error {
 	db.MustExec("DELETE FROM channel WHERE id > 10")
 	db.MustExec("DELETE FROM message WHERE id > 10000")
 	havereadC.Clear()
+	messageC.initializeFromDB()
 	return c.String(204, "")
 }
 
