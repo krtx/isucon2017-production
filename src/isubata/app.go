@@ -659,6 +659,7 @@ func postProfile(c echo.Context) error {
 		}
 
 		avatarName = fmt.Sprintf("%x%s", sha1.Sum(avatarData), ext)
+
 	}
 
 	if avatarName != "" && len(avatarData) > 0 {
@@ -666,6 +667,8 @@ func postProfile(c echo.Context) error {
 		if err != nil {
 			return err
 		}
+		writeImage(avatarName, avatarData)
+
 		_, err = db.Exec("UPDATE user SET avatar_icon = ? WHERE id = ?", avatarName, self.ID)
 		if err != nil {
 			return err
@@ -680,6 +683,16 @@ func postProfile(c echo.Context) error {
 	}
 
 	return c.Redirect(http.StatusSeeOther, "/")
+}
+
+func writeImage(filename string, data []byte) {
+	fn := fmt.Sprintf("../public/icons/%s", filename)
+	f, err := os.OpenFile(fn, os.O_WRONLY|os.O_CREATE, 0666)
+	if err != nil {
+		panic(err)
+	}
+	f.Write(data)
+	f.Close()
 }
 
 func getIcon(c echo.Context) error {
@@ -705,6 +718,7 @@ func getIcon(c echo.Context) error {
 	default:
 		return echo.ErrNotFound
 	}
+	writeImage(name, data)
 	return c.Blob(http.StatusOK, mime, data)
 }
 
