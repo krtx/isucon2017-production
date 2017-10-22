@@ -127,21 +127,21 @@ type Message struct {
 func queryMessages(chanID, lastID int64) ([]Message, error) {
 	msgs := []Message{}
 	err := db.Select(&msgs,
-		` SELECT m.id AS "id",
-	m.channel_id AS "channel_id",
-	m.user_id AS "user_id",
-	m.content AS "content",
-	m.created_at AS "created_at",
-	u.id AS "user.id",
-	u.name AS "user.name",
-	u.salt AS "user.salt",
-	u.password AS "user.password",
-	u.display_name AS "user.display_name",
-	u.avatar_icon AS "user.avatar_icon",
-	u.created_at AS "user.created_at" FROM message m
-	JOIN user u ON u.id = m.user_id
-	WHERE m.id > ? AND m.channel_id = ?
-	ORDER BY m.id DESC LIMIT 100;`,
+		`select m.id as "id",
+	m.channel_id as "channel_id",
+	m.user_id as "user_id",
+	m.content as "content",
+	m.created_at as "created_at",
+	u.id as "user.id",
+	u.name as "user.name",
+	u.salt as "user.salt",
+	u.password as "user.password",
+	u.display_name as "user.display_name",
+	u.avatar_icon as "user.avatar_icon",
+	u.created_at as "user.created_at" from message m
+	join user u on u.id = m.user_id
+	where m.id > ? and m.channel_id = ?
+	order by m.id desc limit 100`,
 		lastID, chanID)
 	return msgs, err
 }
@@ -527,7 +527,20 @@ func getHistory(c echo.Context) error {
 
 	messages := []Message{}
 	err = db.Select(&messages,
-		"SELECT * FROM message WHERE channel_id = ? ORDER BY id DESC LIMIT ? OFFSET ?",
+		`select m.id as "id",
+	m.channel_id as "channel_id",
+	m.user_id as "user_id",
+	m.content as "content",
+	m.created_at as "created_at",
+	u.id as "user.id",
+	u.name as "user.name",
+	u.salt as "user.salt",
+	u.password as "user.password",
+	u.display_name as "user.display_name",
+	u.avatar_icon as "user.avatar_icon",
+	u.created_at as "user.created_at" from message m
+	join user u on u.id = m.user_id
+	WHERE m.channel_id = ? ORDER BY m.id DESC LIMIT ? OFFSET ?`,
 		chID, N, (page-1)*N)
 	if err != nil {
 		return err
