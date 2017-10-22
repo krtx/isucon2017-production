@@ -436,12 +436,11 @@ func fetchUnread(c echo.Context) error {
 	// db.Get()
 
 	res := []FetchUnreadRes{}
-	err := db.Select(&res,
-		`select count(*) as count,channel.id as channel_id
-from channel
-left join haveread on (channel.id = haveread.channel_id and haveread.user_id = ?)
-left join message on (channel.id = message.channel_id)
-where (haveread.user_id = ? and haveread.message_id < message.id) or (haveread.user_id IS NULL and message.content IS NOT NULL) group by channel.id;`, userID, userID)
+
+	// "select count(*) as count,channel.id as channel_id from channel left join haveread on (channel.id = haveread.channel_id and haveread.user_id = ?) left join message on (channel.id = message.channel_id) where (haveread.user_id = ? and haveread.message_id < message.id) or (haveread.user_id IS NULL and message.content IS NOT NULL) group by channel.id;"
+
+	sql := "select count(*) as count,channel.id as channel_id from channel left join haveread on (channel.id = haveread.channel_id and haveread.user_id = ?) join message on (channel.id = message.channel_id) where (haveread.user_id = ? and haveread.message_id < message.id) or (haveread.user_id IS NULL) group by channel.id"
+	err := db.Select(&res, sql, userID, userID)
 
 	if err != nil {
 		return err
