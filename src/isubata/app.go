@@ -419,31 +419,9 @@ func getMessage(c echo.Context) error {
 	return c.JSON(http.StatusOK, response)
 }
 
-func queryChannels() ([]int64, error) {
-	res := []int64{}
-	err := db.Select(&res, "SELECT id FROM channel")
-	return res, err
-}
-
-func queryHaveRead(userID, chID int64) (int64, error) {
-	type HaveRead struct {
-		UserID    int64     `db:"user_id"`
-		ChannelID int64     `db:"channel_id"`
-		MessageID int64     `db:"message_id"`
-		UpdatedAt time.Time `db:"updated_at"`
-		CreatedAt time.Time `db:"created_at"`
-	}
-	h := HaveRead{}
-
-	err := db.Get(&h, "SELECT * FROM haveread WHERE user_id = ? AND channel_id = ?",
-		userID, chID)
-
-	if err == sql.ErrNoRows {
-		return 0, nil
-	} else if err != nil {
-		return 0, err
-	}
-	return h.MessageID, nil
+type FetchUnreadRes struct {
+	Count     int64 `db:"count"`
+	ChannelId int64 `db:"channel_id"`
 }
 
 func fetchUnread(c echo.Context) error {
@@ -454,35 +432,27 @@ func fetchUnread(c echo.Context) error {
 
 	time.Sleep(time.Second)
 
-	channels, err := queryChannels()
+	// // 最初からあるやつですが、これ何
+	// db.Get()
+
+	res := []FetchUnreadRes{}
+
+	// "select count(*) as count,channel.id as channel_id from channel left join haveread on (channel.id = haveread.channel_id and haveread.user_id = ?) left join message on (channel.id = message.channel_id) where (haveread.user_id = ? and haveread.message_id < message.id) or (haveread.user_id IS NULL and message.content IS NOT NULL) group by channel.id;"
+
+	sql := "select count(*) as count,channel.id as channel_id from channel left join haveread on (channel.id = haveread.channel_id and haveread.user_id = ?) join message on (channel.id = message.channel_id) where (haveread.user_id = ? and haveread.message_id < message.id) or (haveread.user_id IS NULL) group by channel.id"
+	err := db.Select(&res, sql, userID, userID)
+
 	if err != nil {
 		return err
 	}
 
 	resp := []map[string]interface{}{}
 
-	for _, chID := range channels {
-		lastID, err := queryHaveRead(userID, chID)
-		if err != nil {
-			return err
-		}
-
-		var cnt int64
-		if lastID > 0 {
-			err = db.Get(&cnt,
-				"SELECT COUNT(*) as cnt FROM message WHERE channel_id = ? AND ? < id",
-				chID, lastID)
-		} else {
-			err = db.Get(&cnt,
-				"SELECT COUNT(*) as cnt FROM message WHERE channel_id = ?",
-				chID)
-		}
-		if err != nil {
-			return err
-		}
+	for _, unreadRes := range res {
 		r := map[string]interface{}{
-			"channel_id": chID,
-			"unread":     cnt}
+			"channel_id": unreadRes.ChannelId,
+			"unread":     unreadRes.Count,
+		}
 		resp = append(resp, r)
 	}
 
