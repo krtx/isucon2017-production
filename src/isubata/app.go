@@ -441,7 +441,7 @@ func fetchUnread(c echo.Context) error {
 from channel
 left join haveread on (channel.id = haveread.channel_id and haveread.user_id = ?)
 left join message on (channel.id = message.channel_id)
-where (haveread.user_id = ? and haveread.message_id < message.id) or (haveread.user_id IS NULL and message.content IS NOT NULL) group by channel.id;`, userId, userId)
+where (haveread.user_id = ? and haveread.message_id < message.id) or (haveread.user_id IS NULL and message.content IS NOT NULL) group by channel.id;`, userID, userID)
 
 	if err != nil {
 		return err
