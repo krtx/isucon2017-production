@@ -121,11 +121,27 @@ type Message struct {
 	UserID    int64     `db:"user_id"`
 	Content   string    `db:"content"`
 	CreatedAt time.Time `db:"created_at"`
+	User      User      `db:"user"`
 }
 
 func queryMessages(chanID, lastID int64) ([]Message, error) {
 	msgs := []Message{}
-	err := db.Select(&msgs, "SELECT * FROM message WHERE id > ? AND channel_id = ? ORDER BY id DESC LIMIT 100",
+	err := db.Select(&msgs,
+		`select m.id as "id",
+	m.channel_id as "channel_id",
+	m.user_id as "user_id",
+	m.content as "content",
+	m.created_at as "created_at",
+	u.id as "user.id",
+	u.name as "user.name",
+	u.salt as "user.salt",
+	u.password as "user.password",
+	u.display_name as "user.display_name",
+	u.avatar_icon as "user.avatar_icon",
+	u.created_at as "user.created_at" from message m
+	join user u on u.id = m.user_id
+	where m.id > ? and m.channel_id = ?
+	order by m.id desc limit 100`,
 		lastID, chanID)
 	return msgs, err
 }
@@ -352,16 +368,9 @@ func postMessage(c echo.Context) error {
 }
 
 func jsonifyMessage(m Message) (map[string]interface{}, error) {
-	u := User{}
-	err := db.Get(&u, "SELECT name, display_name, avatar_icon FROM user WHERE id = ?",
-		m.UserID)
-	if err != nil {
-		return nil, err
-	}
-
 	r := make(map[string]interface{})
 	r["id"] = m.ID
-	r["user"] = u
+	r["user"] = m.User
 	r["date"] = m.CreatedAt.Format("2006/01/02 15:04:05")
 	r["content"] = m.Content
 	return r, nil
@@ -518,7 +527,20 @@ func getHistory(c echo.Context) error {
 
 	messages := []Message{}
 	err = db.Select(&messages,
-		"SELECT * FROM message WHERE channel_id = ? ORDER BY id DESC LIMIT ? OFFSET ?",
+		`select m.id as "id",
+	m.channel_id as "channel_id",
+	m.user_id as "user_id",
+	m.content as "content",
+	m.created_at as "created_at",
+	u.id as "user.id",
+	u.name as "user.name",
+	u.salt as "user.salt",
+	u.password as "user.password",
+	u.display_name as "user.display_name",
+	u.avatar_icon as "user.avatar_icon",
+	u.created_at as "user.created_at" from message m
+	join user u on u.id = m.user_id
+	WHERE m.channel_id = ? ORDER BY m.id DESC LIMIT ? OFFSET ?`,
 		chID, N, (page-1)*N)
 	if err != nil {
 		return err
