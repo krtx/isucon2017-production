@@ -63,6 +63,20 @@ func newMessageCache() *MessageCache {
 	}
 }
 
+func (c *HaveReadCache) initializeFromDB() {
+	type Result struct {
+		UserID    int64 `db:"user_id"`
+		ChannelID int64 `db:"channel_id"`
+		MessageID int64 `db:"message_id"`
+	}
+	c.data = make(map[HaveReadCacheKey]int64)
+	dst := []Result{}
+	db.Select(&dst, "SELECT user_id, channel_id, message_id FROM haveread")
+	for _, r := range dst {
+		c.data[HaveReadCacheKey{r.UserID, r.ChannelID}] = r.MessageID
+	}
+}
+
 func (c *MessageCache) addMessage(chanId int64) {
 	if val, ok := c.data[chanId]; ok {
 		c.data[chanId] = val + 1
@@ -155,6 +169,7 @@ func init() {
 	log.Printf("Succeeded to connect db.")
 
 	messageC.initializeFromDB()
+	havereadC.initializeFromDB()
 }
 
 type User struct {
@@ -299,6 +314,7 @@ func getInitialize(c echo.Context) error {
 	db.MustExec("DELETE FROM image WHERE id > 1001")
 	db.MustExec("DELETE FROM channel WHERE id > 10")
 	db.MustExec("DELETE FROM message WHERE id > 10000")
+	db.MustExec("DELETE FROM haveread")
 	havereadC.Clear()
 	messageC.initializeFromDB()
 	return c.String(204, "")
@@ -483,6 +499,10 @@ func getMessage(c echo.Context) error {
 	}
 
 	if len(messages) > 0 {
+		_, err := db.Exec("INSERT INTO haveread (user_id, channel_id, message_id, updated_at, created_at)"+
+			" VALUES (?, ?, ?, NOW(), NOW())"+
+			" ON DUPLICATE KEY UPDATE message_id = ?, updated_at = NOW()",
+			userID, chanID, messages[0].ID, messages[0].ID)
 		havereadC.Set(userID, chanID, messages[0].ID)
 		if err != nil {
 			return err
