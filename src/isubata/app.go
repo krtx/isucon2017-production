@@ -80,14 +80,14 @@ func (c *MessageCache) getCount(chanId int64) int64 {
 
 func (c *MessageCache) initializeFromDB() {
 	type Result struct {
-		channelID int64 `db:"channel_id"`
-		count     int64 `db:"count"`
+		ChannelID int64 `db:"channel_id"`
+		Count     int64 `db:"count"`
 	}
 	c.data = make(map[int64]int64)
 	dst := []Result{}
 	db.Select(&dst, `SELECT channel_id, COUNT(*) AS count from message GROUP BY channel_id`)
 	for _, r := range dst {
-		c.data[r.channelID] = r.count
+		c.data[r.ChannelID] = r.Count
 	}
 }
 
@@ -153,6 +153,8 @@ func init() {
 	db.SetMaxOpenConns(20)
 	db.SetConnMaxLifetime(5 * time.Minute)
 	log.Printf("Succeeded to connect db.")
+
+	messageC.initializeFromDB()
 }
 
 type User struct {
