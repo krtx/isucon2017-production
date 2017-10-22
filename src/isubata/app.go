@@ -16,6 +16,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
@@ -30,9 +31,19 @@ const (
 	avatarMaxBytes = 1 * 1024 * 1024
 )
 
+type FetchUnreadRes struct {
+	Count     int64 `db:"count"`
+	ChannelId int64 `db:"channel_id"`
+}
+
 var (
 	db            *sqlx.DB
 	ErrBadReqeust = echo.NewHTTPError(http.StatusBadRequest)
+
+	unreadCurrentState [20]byte
+	unreadCacheState   map[int64][20]byte
+	unreadCache        map[int64][]FetchUnreadRes
+	unreadCacheM       sync.Mutex
 )
 
 type Renderer struct {
@@ -82,6 +93,13 @@ func init() {
 	db.SetMaxOpenConns(20)
 	db.SetConnMaxLifetime(5 * time.Minute)
 	log.Printf("Succeeded to connect db.")
+
+	unreadCacheM.Lock()
+	defer unreadCacheM.Unlock()
+
+	unreadCurrentState = sha1.Sum([]byte("initial state"))
+	unreadCacheState = map[int64][20]byte{}
+	unreadCache = map[int64][]FetchUnreadRes{}
 }
 
 type User struct {
@@ -364,6 +382,11 @@ func postMessage(c echo.Context) error {
 		return err
 	}
 
+	// update unread cache state
+	unreadCacheM.Lock()
+	defer unreadCacheM.Unlock()
+	unreadCurrentState = sha1.Sum(unreadCurrentState[:])
+
 	return c.NoContent(204)
 }
 
@@ -416,12 +439,12 @@ func getMessage(c echo.Context) error {
 		}
 	}
 
-	return c.JSON(http.StatusOK, response)
-}
+	// update unread cache state
+	unreadCacheM.Lock()
+	defer unreadCacheM.Unlock()
+	unreadCurrentState = sha1.Sum(unreadCurrentState[:])
 
-type FetchUnreadRes struct {
-	Count     int64 `db:"count"`
-	ChannelId int64 `db:"channel_id"`
+	return c.JSON(http.StatusOK, response)
 }
 
 func fetchUnread(c echo.Context) error {
@@ -435,12 +458,34 @@ func fetchUnread(c echo.Context) error {
 	// // 最初からあるやつですが、これ何
 	// db.Get()
 
-	res := []FetchUnreadRes{}
+	unreadCacheM.Lock()
+	defer unreadCacheM.Unlock()
 
-	// "select count(*) as count,channel.id as channel_id from channel left join haveread on (channel.id = haveread.channel_id and haveread.user_id = ?) left join message on (channel.id = message.channel_id) where (haveread.user_id = ? and haveread.message_id < message.id) or (haveread.user_id IS NULL and message.content IS NOT NULL) group by channel.id;"
+	h, ok := unreadCacheState[userID]
+	if ok && h == unreadCurrentState {
+		res, ok := unreadCache[userID]
+		if ok {
+			resp := []map[string]interface{}{}
+
+			for _, unreadRes := range res {
+				r := map[string]interface{}{
+					"channel_id": unreadRes.ChannelId,
+					"unread":     unreadRes.Count,
+				}
+				resp = append(resp, r)
+			}
+
+			return c.JSON(http.StatusOK, resp)
+		}
+	}
+
+	res := []FetchUnreadRes{}
 
 	sql := "select count(*) as count,channel.id as channel_id from channel left join haveread on (channel.id = haveread.channel_id and haveread.user_id = ?) join message on (channel.id = message.channel_id) where (haveread.user_id = ? and haveread.message_id < message.id) or (haveread.user_id IS NULL) group by channel.id"
 	err := db.Select(&res, sql, userID, userID)
+
+	unreadCacheState[userID] = unreadCurrentState
+	unreadCache[userID] = res
 
 	if err != nil {
 		return err
