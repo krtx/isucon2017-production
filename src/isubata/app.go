@@ -140,7 +140,7 @@ func queryMessages(chanID, lastID int64) ([]Message, error) {
 	u.avatar_icon AS "user.avatar_icon",
 	u.created_at AS "user.created_at" FROM message m
 	JOIN user u ON u.id = m.user_id
-	WHERE m.id > 1 AND m.channel_id = 2
+	WHERE m.id > ? AND m.channel_id = ?
 	ORDER BY m.id DESC LIMIT 100;`,
 		lastID, chanID)
 	return msgs, err
