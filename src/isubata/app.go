@@ -43,6 +43,77 @@ func (r *Renderer) Render(w io.Writer, name string, data interface{}, c echo.Con
 	return r.templates.ExecuteTemplate(w, name, data)
 }
 
+var (
+	havereadC = newHaveReadCache()
+	messageC  = newMessageCache()
+)
+
+type HaveReadCacheKey struct {
+	userId int64
+	chanId int64
+}
+
+type MessageCache struct {
+	data map[int64]int64
+}
+
+func newMessageCache() *MessageCache {
+	return &MessageCache{
+		make(map[int64]int64),
+	}
+}
+
+func (c *MessageCache) addMessage(chanId int64) {
+	if val, ok := c.data[chanId]; ok {
+		c.data[chanId] = val + 1
+	} else {
+		c.data[chanId] = 1
+	}
+}
+func (c *MessageCache) getCount(chanId int64) int64 {
+	if val, ok := c.data[chanId]; ok {
+		return val
+	} else {
+		return 0
+	}
+}
+
+func (c *MessageCache) initializeFromDB() {
+	type Result struct {
+		ChannelID int64 `db:"channel_id"`
+		Count     int64 `db:"count"`
+	}
+	c.data = make(map[int64]int64)
+	dst := []Result{}
+	db.Select(&dst, `SELECT channel_id, COUNT(*) AS count from message GROUP BY channel_id`)
+	for _, r := range dst {
+		c.data[r.ChannelID] = r.Count
+	}
+}
+
+type HaveReadCache struct {
+	data map[HaveReadCacheKey]int64
+}
+
+func newHaveReadCache() *HaveReadCache {
+	return &HaveReadCache{
+		make(map[HaveReadCacheKey]int64),
+	}
+}
+func (c *HaveReadCache) Clear() {
+	c.data = make(map[HaveReadCacheKey]int64)
+}
+func (c *HaveReadCache) Set(userId int64, chanId int64, lastId int64) {
+	c.data[HaveReadCacheKey{userId, chanId}] = lastId
+}
+func (c *HaveReadCache) Get(userId int64, chanId int64) int64 {
+	if val, ok := c.data[HaveReadCacheKey{userId, chanId}]; ok {
+		return val
+	} else {
+		return 0
+	}
+}
+
 func init() {
 	seedBuf := make([]byte, 8)
 	crand.Read(seedBuf)
@@ -82,6 +153,8 @@ func init() {
 	db.SetMaxOpenConns(20)
 	db.SetConnMaxLifetime(5 * time.Minute)
 	log.Printf("Succeeded to connect db.")
+
+	messageC.initializeFromDB()
 }
 
 type User struct {
@@ -112,7 +185,9 @@ func addMessage(channelID, userID int64, content string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return res.LastInsertId()
+	insertId, err := res.LastInsertId()
+	messageC.addMessage(channelID) // TODO: add insertId
+	return insertId, err
 }
 
 type Message struct {
@@ -224,7 +299,8 @@ func getInitialize(c echo.Context) error {
 	db.MustExec("DELETE FROM image WHERE id > 1001")
 	db.MustExec("DELETE FROM channel WHERE id > 10")
 	db.MustExec("DELETE FROM message WHERE id > 10000")
-	db.MustExec("DELETE FROM haveread")
+	havereadC.Clear()
+	messageC.initializeFromDB()
 	return c.String(204, "")
 }
 
@@ -407,10 +483,7 @@ func getMessage(c echo.Context) error {
 	}
 
 	if len(messages) > 0 {
-		_, err := db.Exec("INSERT INTO haveread (user_id, channel_id, message_id, updated_at, created_at)"+
-			" VALUES (?, ?, ?, NOW(), NOW())"+
-			" ON DUPLICATE KEY UPDATE message_id = ?, updated_at = NOW()",
-			userID, chanID, messages[0].ID, messages[0].ID)
+		havereadC.Set(userID, chanID, messages[0].ID)
 		if err != nil {
 			return err
 		}
@@ -426,24 +499,7 @@ func queryChannels() ([]int64, error) {
 }
 
 func queryHaveRead(userID, chID int64) (int64, error) {
-	type HaveRead struct {
-		UserID    int64     `db:"user_id"`
-		ChannelID int64     `db:"channel_id"`
-		MessageID int64     `db:"message_id"`
-		UpdatedAt time.Time `db:"updated_at"`
-		CreatedAt time.Time `db:"created_at"`
-	}
-	h := HaveRead{}
-
-	err := db.Get(&h, "SELECT * FROM haveread WHERE user_id = ? AND channel_id = ?",
-		userID, chID)
-
-	if err == sql.ErrNoRows {
-		return 0, nil
-	} else if err != nil {
-		return 0, err
-	}
-	return h.MessageID, nil
+	return havereadC.Get(userID, chID), nil
 }
 
 func fetchUnread(c echo.Context) error {
@@ -473,9 +529,8 @@ func fetchUnread(c echo.Context) error {
 				"SELECT COUNT(*) as cnt FROM message WHERE channel_id = ? AND ? < id",
 				chID, lastID)
 		} else {
-			err = db.Get(&cnt,
-				"SELECT COUNT(*) as cnt FROM message WHERE channel_id = ?",
-				chID)
+			cnt = messageC.getCount(chID)
+			err = nil
 		}
 		if err != nil {
 			return err
